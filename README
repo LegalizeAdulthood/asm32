@@ -1,0 +1,249 @@
+                       ASM32 -- a DSP32C Assembler
+
+			   by Tom Roberts
+
+THIS SOFTWARE IS RELEASED "AS IS", WITH NO WARRANTY EXPRESSED OR IMPLIED.
+This software is copyright 1984, 1991, 1992, 1993, 1994 by Tom Roberts.
+License is granted for unlimited distribution, as long as the following
+conditions are met:
+  A. This notice is preserved intact.
+  B. No charge is made for the software (other than a reasonable
+     distribution/duplication fee).
+
+This program implements an assembler for the AT&T DSP32C digital
+signal processing chip. It is configured to run on an 80X86
+processor running MS-DOS, using Borland Turbo C 1.X.
+
+
+Questions, comments, bug fixes, etc. can be sent to:
+
+	tjrob@iexist.att.com
+
+Note that while I work for AT&T, this software was written entirely
+without AT&T resources. Neither AT&T nor I will support this software.
+I may choose to distribute bug fixes, if appropriate. Note that this
+software is now 2-3 years old (parts of CPP are 10 years old).
+
+Tom Roberts	tjrob@iexist.att.com	September 12, 1994
+
+
+
+This assembler interprets the assembly language of the AT&RT DSP32C,
+as described in "WE(Rg) DSP32C Digial Signal Processor Information
+Manual", by AT&T (1990). Several errors in that manual have been corrected
+in the program.
+
+The assembler comes as two executable and 1 batch files:
+	CPP.EXE		an extended C pre-processor.
+	ASM32.EXE	the assembler.
+	A32.BAT		batch file to run both .EXE files
+
+Source Files:
+	README		this README file
+	makefile	a makefile for both CPP.EXE and ASM32.EXE
+    The assembler:
+	asm32.y		yacc source for the assembler
+    The extended C preprocessor:
+	cexpr.c		C source for expressions in CPP
+	cpp.c		C source for the pre-processor (CPP)
+	cppsubs.c	C source for various CPP subroutines
+	port.h		C source for portability definitions
+    A program to test the DSP:
+	tsynth/*.*	files to implement a test program which can
+			exercise the PC-to-DSP interface.
+			Unlikely to actually work without modification
+			for your PC-to-DSP hardware interface, your DSP
+			DRAM refresh, your I/O devices on the DSP, etc.
+			But it does give you some .s files with which
+			to test the assembler.
+
+Building the assembler from source requires yacc. Public-domain
+source code for a version of yacc which runs on a PC and other
+platforms has been posted (years ago) to USENET. yacc is a compiler-
+compiler which generates a LR(1) parser from a context-free grammar 
+description (the .y file).
+
+
+Note that there is no documentation in this package, except for this
+README file and the comments in the source code.
+Note also that no linker is used - the output is absolute DSP32C
+binary code, starting at address 0, in DSP32C byte order.
+
+
+Portability:
+The "port.h" header is an ancient attempt to handle portability issues,
+used by the CPP files only. The assembler itself will probably compile
+under any modern C compiler; whether or not it works remains to be seen.
+It does compile properly under BC++ ver 3.1, with a lot of warnings;
+the resulting executable worked properly to build the TSYNTH program;
+I was unable to test the program as the DSP board is not in my PC.
+
+The two most likely problems are byte order and float-to-DSP-float
+conversion. 
+
+Byte order might not be a problem, as the DSP program is kept in an
+array of type "unsigned char", and the output is defined to
+be in DSP32C byte order. Internal conversions from long to char are
+performed by shifts, not by character indexing within a long
+(routine "define_data()").
+
+Conversion from float to DSP-float will need to be re-written for
+other floating-point formats (routine "dspfloat()").
+
+
+
+
+Description of the assembler (ASM32.EXE):
+
+/*	asm32.y - DSP32C assembler
+
+	USAGE:
+		asm32 [-d] file.s [infile]
+
+	Assembles file.s, producing file.dsp and file.lst.
+	file.dsp is a direct image of the program, in byte sequence
+	for the DSP32C, starting at address 0. file.lst is the listing.
+	Output files are in the current directory, regardless of where the
+	source file is located.
+
+	If infile is present, it is used instead of file.s for input -
+	file.s is used for titles, .dsp and .lst filenames, etc. This
+	is useful when cpp is used before asm32 - the #line directives
+	from cpp keep error messages synchronized to the cpp input
+	file.s, not to the intermediate temporary file infile. Use the
+	"-c" flag to cpp to keep comments in file.lst (cpp directives
+	and #line directives WILL NOT appear in file.lst).
+
+	If "-d" is present, the output file will be file.dat, and is
+	a comma-separated series of bytes, suitable for inclusion into
+	a C program.
+	
+	All DSP32C instructions are supported. Note that for ambiguous
+	instructions (e.g. a0 = a1;), a particular choice was chosen
+	(by selection of grammar rules implemented).
+
+	Enhancement: 24-bit register names can be used anywhere. In
+	particular, *r1e++ = r2e is OK (the AT&T assembler will only
+	accept *r1++ = r2e for this instruction). This makes it easy
+	to #define real names for registers, and use them throughout
+	your code.
+
+	The following psuedo-ops are implemented:
+
+		org	expr		sets the current memory origin
+		end			ends the assembly (EOF also works)
+		align	expr		align to (expr) bytes
+		byte	expr,expr, ...	define data bytes
+		char	expr,expr, ...		"
+		int	expr,expr, ...	define 2-byte words
+		word	expr,expr, ...		"
+		int24	expr,expr, ...	define 4-byte data
+		long	expr,expr, ...		"
+		float	fconst,fconst.. define floating-point constants
+		N*byte	expr		define N bytes (N is an expr)
+		... same for char, int, word, int24, long, float
+		symbol = expr		define a SYMBOL
+		label equ expr		define a label (also label:)
+		page			eject a page in listing
+		page	expr		define page length
+		page	expr,expr	define page length & width
+		list	expr		set listing type (default=3):
+						1 = main file
+						2 = generated code
+						4 = include files
+
+	Comments are as in C++.
+
+	Labels are ABSOLUTE, and are indicated by "name:" before a
+	(possibly empty) statement.
+
+	Statements are terminated by ; and \n; empty statements are
+	allowed.
+
+	Symbols can be re-defined; labels cannot. Both are kept as 32-bit
+	long integers.
+
+	expr is an integer expression, using C operators, labels,
+	symbols, or integer constants. Integer constants are as in
+	C ([+-]ddd, 0xddd, 0ddd), but character ('X') and string ("X")
+	constants are NOT allowed.
+
+	fconst is a floating-point constant ([+-]ddd.ddd[E[+-]ddd]),
+	where the initial digit and the '.' MUST be present.
+
+	"#line 123 filename" is also recognized (# in col 1), and sets
+	Line_number and Filename.
+
+
+	Uses yacc (ported to a PC) and Turbo C++ ver 1.01 (in C mode).
+	Has 0 Shift/Reduce conflicts, and 0 Reduce/Reduce conflicts (Hurrah!).
+
+
+	Written by Tom Roberts, 1/3/91. Listings fixed 1/15/92  TJR.
+*/
+
+
+
+Description of the extended pre-processor (CPP.EXE):
+
+/*	cpp.c - C Preprocessor	*/
+/*
+	USAGE:
+		cpp [-C] [-oout] file(s)
+		
+	Expands file(s) (- = stdin) and writes to stdout.
+	If -oout is present, output is written to file out.
+	If -C is present, comments are preserved.
+	Puts "#line 123 file" lines out as appropriate.
+*/
+
+/*
+	cppsubs - subroutines for the C pre-processor.
+
+	Copyright 3/19/84 by Tom Roberts. All rights reserved.
+
+
+	The C pre-processor implemented here has a few changes from the
+	standard UNIX(TM) pre-processor:
+
+	1) #line is not recognized.
+	2) defined(symbol) is not recognized
+	3) __FILE__ and __LINE__ are not recognized.
+	4) #if/#else/#endif (all flavors) MAY be used inside a #define:
+		#define m(a)	\
+		#ifdef a	\
+			a is defined\
+		#else		\
+			a is not defined\
+		#endif
+	   all of the #'s MUST follow an escaped newline.
+	5) there is a new statement:
+		#set name expression
+	   the expression is expanded (for #define-d symbols),
+	   name is #undef-ed, and the expression
+	   is evaluated (must contain only operators and constants);
+	   name is then #define-d to be the result (in ASCII, decimal radix).
+	   All C operators are permitted.
+	6) newlines in the input are not rigorously preserved (e.g. within
+	   comments).
+	7) comments are normally crunched out of #define macro-bodies; an
+	   exception is made for the null comment (slash-star-slash -
+	   indicated by <sss> below).
+	   This permits generating unique labels inside #define-s:
+		#define l 0
+		#define m	\
+			x<sss>l:	operation();\
+		#set l l+1
+	   The null comment can be used for any concatenation desired.
+	   (I cannot use <sss> here, because it would end this comment!)
+	8) In expressions, the conditional operator (a ? b : c) MUST
+	   be surrounded by parentheses when nested within another
+	   conditional operator.
+	   In expressions, brackets ([]) are equivalent to parentheses (()).
+	   Comma (,) and semicolon (;) will terminate the expression.
+	   (#if and #set are the only places expressions are interpreted).
+
+*/
+
+
+----  end of README  -----
